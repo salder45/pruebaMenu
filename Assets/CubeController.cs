@@ -6,66 +6,46 @@ using OpenNI;
 using NITE;
 
 public class CubeController : MonoBehaviour {
+	private readonly string XML_CONFIG=@".//OpenNI.xml";
+	private const string WAVE="Wave";
 	private Context context;
 	private ScriptNode scriptNode;
 	private DepthGenerator depth;
-	private UserGenerator userGenerator;
-	private SkeletonCapability skeletonCapability;
-	private PoseDetectionCapability poseDetectionCapability;
-	private string calibPose;
-	private Dictionary <int, Dictionary<SkeletonJoint,SkeletonJointPosition>> joints;
-	private readonly string XML_CONFIG=@".//OpenNI.xml";
-	private bool shouldRun=false;
-	private const float MEDIDA_X=14f;
-	private const float MEDIDA_Y=14f;
-	private const float VALOR_CLICK=150f;
-	//
-	
+	private HandsGenerator hands;
+	private GestureGenerator gesture;
+	private Point3D puntoInicial=Point3D.ZeroPoint;
+	private float zAnterior=0;
 	// Use this for initialization
 	void Start () {
-		Debug.Log("START");
+		//Debug.Log("START");
 		this.context=Context.CreateFromXmlFile(XML_CONFIG, out scriptNode);
-		this.depth=this.context.FindExistingNode(NodeType.Depth) as  DepthGenerator;
-		if(this.depth==null){
+		this.depth=this.context.FindExistingNode(NodeType.Depth) as DepthGenerator;
+		if(depth==null){
 			throw new Exception("Nodo de Profundidad no encontrado");
 		}
+		this.hands=this.context.FindExistingNode(NodeType.Hands) as HandsGenerator;
+		if(this.hands==null){
+			throw new Exception("Nodo de Manos no encontrado");
+		}
+		this.gesture=this.context.FindExistingNode(NodeType.Gesture) as GestureGenerator;
+		if(this.gesture==null){
+			throw new Exception("Nodo de Gestos no encontrado");
+		}
+		//handdlers
+		this.hands.HandCreate+=hands_HandCreate;
+		this.hands.HandUpdate+=hands_HandUpdate;
+		this.hands.HandDestroy+=hands_HandDestroy;
 		
-		this.userGenerator=new UserGenerator(this.context);
-		this.skeletonCapability=this.userGenerator.SkeletonCapability;
-		this.poseDetectionCapability=this.userGenerator.PoseDetectionCapability;
-		this.calibPose=this.skeletonCapability.CalibrationPose;
-		this.userGenerator.NewUser+=this.userGenerator_NewUser;
-		this.userGenerator.LostUser+=this.userGenerator_LostUser;
-		this.poseDetectionCapability.PoseDetected+=this.poseDetectionCapability_PoseDetected;
-		this.skeletonCapability.CalibrationComplete+=this.skeletonCapability_CalibrationComplete;
-		this.skeletonCapability.SetSkeletonProfile(SkeletonProfile.All);
+		this.gesture.AddGesture(WAVE);
+		this.gesture.GestureRecognized+=gesture_GestureRecognized;
+		this.gesture.StartGenerating();
 		
-		this.joints=new Dictionary<int,Dictionary<SkeletonJoint,SkeletonJointPosition>>();
-		this.userGenerator.StartGenerating();
-		this.shouldRun=true;
 	}
 	
 	// Update is called once per frame
 	void Update () {
 		//Debug.Log("Update");
-		if(this.shouldRun){
-			try{
-				this.context.WaitOneUpdateAll(this.depth);
-			}catch(Exception){
-				Debug.Log("No paso");
-			}
-		}
-		
-		int[] users=this.userGenerator.GetUsers();
-		foreach(int user in users){
-			if(this.skeletonCapability.IsTracking(user)){
-				SkeletonJointPosition sjpTorso=skeletonCapability.GetSkeletonJointPosition(user,SkeletonJoint.Torso);
-				SkeletonJointPosition sjpManoDr=skeletonCapability.GetSkeletonJointPosition(user,SkeletonJoint.LeftHand);
-				
-				
-				//transform.Translate(new Vector3(despEnX,despEnY,transform.position.z));
-			}
-		}
+		this.context.WaitOneUpdateAll(this.depth);
 	
 	}
 	
@@ -74,49 +54,25 @@ public class CubeController : MonoBehaviour {
 		context.Release();
 	}
 	
-	void userGenerator_NewUser(object sender, NewUserEventArgs e){
-		Debug.Log("New User");
-		if(this.skeletonCapability.DoesNeedPoseForCalibration){
-			this.poseDetectionCapability.StartPoseDetection(this.calibPose,e.ID);
-		}else{
-			this.skeletonCapability.RequestCalibration(e.ID, true);
+	void gesture_GestureRecognized(object sender, GestureRecognizedEventArgs e){
+		if(e.Gesture==WAVE){
+			this.hands.StartTracking(e.EndPosition);
 		}
 	}
 	
-	void userGenerator_LostUser(object sender, UserLostEventArgs e){
-		Debug.Log("Lost User");
-		this.joints.Remove(e.ID);
+	void hands_HandCreate(object sender, HandCreateEventArgs e){
+		Debug.Log("Mano Creada");
+		this.puntoInicial=e.Position;
 	}
 	
-	void poseDetectionCapability_PoseDetected(object sender, PoseDetectedEventArgs e){
-		Debug.Log("Pose Detection");
-		this.poseDetectionCapability.StopPoseDetection(e.ID);
-		this.skeletonCapability.RequestCalibration(e.ID,true);
+	void hands_HandUpdate(object sender, HandUpdateEventArgs e){
+		Debug.Log("Mano Update");
+		Debug.Log("X "+transform.position.x+" Y "+transform.position.y+" Z "+transform.position.z);
 	}
 	
-	void skeletonCapability_CalibrationComplete(object sender, CalibrationProgressEventArgs e){
-		Debug.Log("Calibration Complete");
-		if(e.Status==CalibrationStatus.OK){
-			this.skeletonCapability.StartTracking(e.ID);
-			this.joints.Add(e.ID, new Dictionary<SkeletonJoint, SkeletonJointPosition>());
-		}else if(e.Status!=CalibrationStatus.ManualAbort){
-			if (this.skeletonCapability.DoesNeedPoseForCalibration){
-                    this.poseDetectionCapability.StartPoseDetection(calibPose, e.ID);
-                }else{
-                    this.skeletonCapability.RequestCalibration(e.ID, true);
-                }
-		}
-	}
-	
-	float distanciaEntreDosPuntos(Point3D a,Point3D b){
-		return Mathf.Sqrt(elevaCuadrado(b.X-a.X)+elevaCuadrado(b.Y-a.Y));
-	}
-
-	float elevaCuadrado(float numero){
-		return (float)Math.Pow(numero,2);
-	}
-	
-	float distanciaEnUnEje(float c, float torso,float eje){
-		return Mathf.Sqrt(elevaCuadrado(c)-elevaCuadrado(torso-eje));
+	void hands_HandDestroy(object sender, HandDestroyEventArgs e){
+		Debug.Log("Mano destroy");
+		puntoInicial=Point3D.ZeroPoint;
+		zAnterior=0f;
 	}
 }
